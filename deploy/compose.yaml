@@ -1,0 +1,42 @@
+# ORCA staging. Two containers from one image: the API serves JSON, the worker
+# owns the scheduler. Split so restarting the API never interrupts the tracker.
+#
+#   docker compose -f deploy/compose.yaml up -d --build
+#
+# Needs the compose v2 plugin. Without it, use `make staging-up` which issues
+# the equivalent plain `docker run` commands.
+
+name: orca-staging
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: orca:staging
+    env_file: staging.env
+    environment:
+      ORCA_SCHEDULER_ENABLED: "false"   # the worker owns the jobs
+    # Loopback only. The API has no authentication - do not publish it.
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["orca-staging-data:/data"]
+    restart: unless-stopped
+
+  worker:
+    image: orca:staging
+    depends_on:
+      api:
+        condition: service_started
+    env_file: staging.env
+    environment:
+      ORCA_SCHEDULER_ENABLED: "true"
+    command: ["orca", "worker"]
+    volumes: ["orca-staging-data:/data"]
+    # The image's healthcheck probes HTTP; the worker serves none. A crashed
+    # worker exits the process, and restart: unless-stopped covers that.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  orca-staging-data:

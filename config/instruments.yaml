@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# Tradable universe.
+#
+# IMPORTANT: lot sizes, strike steps and weekly-expiry weekdays are changed by
+# the exchanges from time to time (NSE/BSE circulars). Treat the values below
+# as defaults only. At runtime ORCA prefers the expiry list returned by the
+# data feed (`MarketDataProvider.get_expiries`) and only falls back to the
+# `weekly_expiry_weekday` rule when the feed is unavailable. Re-check these
+# against the current exchange contract specs before trading real size.
+# ---------------------------------------------------------------------------
+underlyings:
+  - symbol: NIFTY
+    name: Nifty 50
+    spot_exchange: NSE_INDEX           # Upstox segment for the index itself
+    option_exchange: NFO               # Kite exchange for the option contracts
+    upstox_instrument_key: "NSE_INDEX|Nifty 50"
+    kite_name: NIFTY                   # prefix of the Kite tradingsymbol
+    lot_size: 75
+    strike_step: 50
+    weekly_expiry_weekday: 1           # 0=Mon ... 4=Fri  (fallback only)
+    has_weekly: true
+    enabled: true
+
+  - symbol: SENSEX
+    name: BSE Sensex
+    spot_exchange: BSE_INDEX
+    option_exchange: BFO
+    upstox_instrument_key: "BSE_INDEX|SENSEX"
+    kite_name: SENSEX
+    lot_size: 20
+    strike_step: 100
+    weekly_expiry_weekday: 3           # fallback only
+    has_weekly: true
+    enabled: true
+
+  # Add more later, e.g.:
+  # - symbol: BANKNIFTY
+  #   upstox_instrument_key: "NSE_INDEX|Nifty Bank"
+  #   lot_size: 35
+  #   strike_step: 100
+  #   has_weekly: false
+  #   enabled: false
+
+market:
+  timezone: Asia/Kolkata
+  open: "09:15"
+  close: "15:30"
+  # Days the scanner should not run even if the scheduler is on (YYYY-MM-DD).
+  holidays: []

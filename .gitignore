@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.conda/
+envs/
+.env
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# runtime data: local db, model artifacts, captured snapshots
+data/*.db
+data/*.db-journal
+data/models/*.joblib
+data/models/*.json
+data/snapshots/
+logs/
+*.log
+
+# broker tokens are never committed
+.tokens.json

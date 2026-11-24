@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# Candidate generation. The scanner enumerates these variants per underlying
+# per expiry, prices them off the live chain, then asks the ML model to score
+# each one. Tweak freely - nothing here is hardcoded in Python.
+# ---------------------------------------------------------------------------
+defaults:
+  min_dte: 0
+  max_dte: 10
+  min_credit_per_lot: 1500        # INR; skip candidates that are not worth it
+  max_spread_pct: 0.04            # skip illiquid legs (bid-ask / mid)
+  min_open_interest: 50000
+
+strategies:
+  - id: short_strangle
+    template: short_strangle
+    enabled: true
+    params:
+      short_delta: [0.10, 0.15, 0.20]   # one candidate per target delta
+      wing: null
+
+  - id: iron_condor
+    template: iron_condor
+    enabled: true
+    params:
+      short_delta: [0.12, 0.18]
+      wing_width_strikes: [4, 8]        # long strike = short +/- n * strike_step
+
+  - id: put_credit_spread
+    template: credit_spread
+    enabled: true
+    params:
+      side: ["PE"]
+      short_delta: [0.20, 0.30]
+      wing_width_strikes: [4]
+
+  - id: call_credit_spread
+    template: credit_spread
+    enabled: false
+    params:
+      side: ["CE"]
+      short_delta: [0.20, 0.30]
+      wing_width_strikes: [4]

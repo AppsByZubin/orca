@@ -1,0 +1,12 @@
+.venv/
+.git/
+data/
+deploy/staging-data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.env
+.env.*
+!.env.example
