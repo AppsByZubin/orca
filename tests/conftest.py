@@ -16,9 +16,15 @@ os.environ.setdefault("ORCA_MAX_OPEN_TRADES", "10")
 
 @pytest.fixture(scope="session", autouse=True)
 def _settings_env():
-    from orca.config import reload_config
+    from orca.config import get_strategy_config, reload_config
 
     reload_config()
+    # The scanner picks the nearest expiry within [min_dte, max_dte]. With the
+    # shipped min_dte=0, a run that happens to fall on an expiry day scans a
+    # 0-DTE chain, whose near-zero time value leaves every candidate below
+    # min_credit_per_lot - so the scan returns [] and the suite fails for a
+    # reason that has nothing to do with the code. Pin it clear of expiry day.
+    get_strategy_config().defaults["min_dte"] = 1
     yield
 
 

@@ -117,7 +117,7 @@ result = permutation_importance(
     n_repeats=10,
     random_state=0,
 )
-ranked = sorted(zip(FEATURE_NAMES, result.importances_mean), key=lambda kv: -kv[1])
+ranked = sorted(zip(FEATURE_NAMES, result.importances_mean, strict=True), key=lambda kv: -kv[1])
 
 print("AUC lost when the column is scrambled (top 8):")
 for name, drop in ranked[:8]:

@@ -1,0 +1,164 @@
+name: Build and publish ORCA image
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orca-docker-publish
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPOSITORY: bizzkpm/orca
+  BOTYARD_REPOSITORY: AppsByZubin/botyard
+  BOTYARD_VALUES_FILE: helm/orca/values.yaml
+
+jobs:
+  build-push-update-helm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ORCA
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: python -m pip install -e ".[dev,parquet]"
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Test
+        run: pytest -q
+
+      - name: Set image tag
+        shell: bash
+        run: echo "IMAGE_TAG=sha-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            docker.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            docker.io/${{ env.IMAGE_REPOSITORY }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=orca
+          cache-to: type=gha,mode=max,scope=orca
+
+      - name: Smoke-test the pushed image
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pull the image that was just pushed, not a local build cache
+          # artefact, so this tests exactly what Kubernetes will run.
+          IMAGE="docker.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+          docker pull "$IMAGE"
+
+          # Same hardening the Helm chart applies: non-root, read-only root
+          # filesystem, writable /tmp and /data. A container that only works
+          # as root would pass a plain `docker run` and then CrashLoop in the
+          # cluster.
+          docker run -d --name orca-smoke \
+            --user 10001:10001 \
+            --read-only \
+            --tmpfs /tmp \
+            --tmpfs /data:uid=10001,gid=10001 \
+            -e ORCA_SCHEDULER_ENABLED=false \
+            -e ORCA_DATABASE_URL=sqlite:////data/orca.db \
+            -p 18000:8000 \
+            "$IMAGE"
+
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18000/api/health > /tmp/health.json; then
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::API never became healthy"
+              docker logs orca-smoke
+              exit 1
+            fi
+            sleep 2
+          done
+
+          cat /tmp/health.json
+          python3 - <<'PY'
+          import json, sys
+          h = json.load(open("/tmp/health.json"))
+          # Config has to actually load: an empty universe is the symptom of a
+          # CONFIG_DIR that does not resolve inside the image.
+          assert h["ok"] is True, h
+          assert h["universe"], "universe is empty - ORCA_CONFIG_DIR is wrong"
+          assert h["trading_enabled"] is False, "image defaults to trading enabled"
+          print("smoke ok:", h["version"], h["universe"])
+          PY
+
+          docker rm -f orca-smoke
+
+      - name: Check out Botyard
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BOTYARD_REPOSITORY }}
+          token: ${{ secrets.BOTYARD_REPO_TOKEN }}
+          ref: master
+          path: botyard
+
+      - name: Update ORCA Helm image tag
+        working-directory: botyard
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Guard the blind sed below: it rewrites every line matching
+          # "^  tag:", so more than one match would silently corrupt the chart.
+          MATCHES=$(grep -c '^  tag: ' "${BOTYARD_VALUES_FILE}")
+          if [ "${MATCHES}" -ne 1 ]; then
+            echo "::error::expected exactly 1 '  tag:' line in ${BOTYARD_VALUES_FILE}, found ${MATCHES}"
+            exit 1
+          fi
+          sed -i -E "s/^  tag: .*/  tag: \"${IMAGE_TAG}\"/" "${BOTYARD_VALUES_FILE}"
+          git diff --check -- "${BOTYARD_VALUES_FILE}"
+          git diff -- "${BOTYARD_VALUES_FILE}"
+
+      - name: Commit and push Helm image tag
+        working-directory: botyard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "${BOTYARD_VALUES_FILE}"; then
+            echo "ORCA Helm image tag is already ${IMAGE_TAG}; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${BOTYARD_VALUES_FILE}"
+          git commit -m "Update ORCA image tag to ${IMAGE_TAG}"
+          git pull --rebase origin master
+          git push origin HEAD:master
