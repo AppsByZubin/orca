@@ -106,3 +106,23 @@ def test_model_train_synthetic(client) -> None:
         "/api/model/train", json={"name": "test-api", "synthetic": True, "rows": 800}
     ).json()
     assert body["metrics"]["n_train"] > 0
+
+
+def test_probability_model(client) -> None:
+    body = client.get("/api/model/probability?symbol=NIFTY&strikes=5").json()
+    assert body["spot"] > 0 and body["atm_iv"] > 0 and body["sigma"] > 0
+    assert [r["sigmas"] for r in body["ranges"]] == [1, 2, 3]
+    assert 0 < len(body["strikes"]) <= 11 and body["curve"]
+    for s in body["strikes"]:
+        assert s["p_below"] + s["p_above"] == pytest.approx(1.0)
+        assert 0.0 <= s["p_touch"] <= 1.0
+    below = [s["p_below"] for s in body["strikes"]]
+    assert below == sorted(below)  # further up the chain, likelier to finish below
+
+
+def test_broker_callback_served_at_registered_path(anon) -> None:
+    # Upstox/Kite redirect to /auth/<broker>/callback (no /api prefix). The route
+    # must exist there (422 = missing ?code, not 404) and need no dashboard login.
+    assert anon.get("/auth/upstox/callback").status_code == 422
+    assert anon.get("/auth/kite/callback").status_code == 422
+    assert anon.get("/auth/upstox/login").status_code == 401

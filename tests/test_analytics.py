@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from orca.analytics.greeks import black_scholes, greeks, implied_vol, year_fraction
 from orca.analytics.payoff import net_credit, payoff_profile, pnl_at
 from orca.domain import OptionType, Side
@@ -66,3 +68,22 @@ def test_iron_condor_has_defined_loss() -> None:
     profile = payoff_profile(legs, 25000.0, span_pct=0.2)
     assert profile.max_loss is not None and profile.max_loss < 0
     assert profile.max_profit > 0
+
+
+# --- probability model ---------------------------------------------------------
+def test_probability_math() -> None:
+    from orca.analytics.probability import density_curve, p_below, p_touch, sigma_ranges
+
+    spot, sigma = 100.0, 0.1
+    assert p_below(spot, spot, sigma) == pytest.approx(0.5)
+    assert p_below(spot * math.exp(sigma), spot, sigma) == pytest.approx(0.8413, abs=1e-4)
+    assert p_touch(spot * math.exp(sigma), spot, sigma) == pytest.approx(2 * 0.1587, abs=1e-4)
+    assert p_touch(spot, spot, sigma) == 1.0
+    one, two, _ = sigma_ranges(spot, sigma)
+    assert one.prob == pytest.approx(0.6827, abs=1e-4)
+    assert two.prob == pytest.approx(0.9545, abs=1e-4)
+    assert one.lower == pytest.approx(spot / math.exp(sigma))
+    curve = density_curve(spot, sigma, points=401, span=6)
+    step = curve[1][0] - curve[0][0]
+    assert sum(d for _x, d, _p in curve) * step == pytest.approx(1.0, abs=1e-3)  # a density
+    assert [p for *_, p in curve] == sorted(p for *_, p in curve)

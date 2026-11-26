@@ -81,6 +81,47 @@ class ChainOut(BaseModel):
     options: list[OptionQuoteOut]
 
 
+# --- probability model --------------------------------------------------------
+class SigmaRangeOut(BaseModel):
+    sigmas: int
+    lower: float
+    upper: float
+    prob: float
+
+
+class StrikeProbabilityOut(BaseModel):
+    strike: float
+    iv: float  # the IV used for this strike
+    iv_source: str  # "otm" (that strike's OTM option) | "itm" | "atm" (fallback)
+    p_below: float
+    p_above: float
+    p_touch: float
+    call_delta: float | None = None
+    put_delta: float | None = None
+
+
+class CurvePointOut(BaseModel):
+    price: float
+    density: float
+    p_below: float
+
+
+class ProbabilityOut(BaseModel):
+    underlying: str
+    expiry: date
+    ts: datetime
+    source: str
+    spot: float
+    atm_strike: float
+    atm_iv: float
+    dte: int
+    t_years: float
+    sigma: float  # atm_iv * sqrt(t_years): one standard deviation of log return
+    ranges: list[SigmaRangeOut]
+    strikes: list[StrikeProbabilityOut]
+    curve: list[CurvePointOut]
+
+
 # --- candidates / signals ---------------------------------------------------
 class LegOut(BaseModel):
     strike: float

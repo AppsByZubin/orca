@@ -21,6 +21,7 @@ from orca.db import init_db
 from orca.jobs.scheduler import start_scheduler, stop_scheduler
 from orca.logging_setup import get_logger, setup_logging
 from orca.web.api import api_router
+from orca.web.api import auth as broker_auth
 
 log = get_logger(__name__)
 
@@ -56,6 +57,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router, prefix="/api")
+    # Broker apps are registered with redirect URIs like
+    # http://127.0.0.1:8000/auth/upstox/callback (no /api), so serve the
+    # broker auth routes there too. Same handlers, same protection.
+    app.include_router(broker_auth.router, include_in_schema=False)
 
     @app.get("/", include_in_schema=False)
     def root() -> dict:
