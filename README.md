@@ -216,7 +216,8 @@ you intend to run `orca train` there - loading a month of 5-minute chains costs
 roughly 2 GB of RAM.
 
 `deploy/bootstrap.sh` leaves port 8000 **closed** and sets `ufw` to SSH-only,
-because the API has no authentication. Reach it through the SSH tunnel above, or a
+because the API is protected only by a single-account login (`ORCA_AUTH_USERNAME` /
+`ORCA_AUTH_PASSWORD`) over plain HTTP. Reach it through the SSH tunnel above, or a
 VPN. `deploy/deploy.sh` syncs with rsync rather than git (this tree is the source
 of truth) and excludes `data/` and your dev `.env`, so local credentials and your
 local database never reach the VM.
@@ -352,7 +353,15 @@ they were trained with.
 
 **The front end** — ORCA ships no UI. Everything is exposed as JSON under `/api` (browse it at
 `/docs`), so the UI is a separate project against that contract. Point `ORCA_CORS_ORIGINS` at its
-origin; `*` is the default and is only safe on localhost, because **the API has no authentication**.
+origin; `*` is the default and is only safe on localhost.
+
+**Login** — every `/api` route except `/api/health`, `/api/session/login` and the broker OAuth
+callbacks requires a bearer token. Get one with
+`POST /api/session/login {"username": "Admin", "password": "passwordpassword"}` and send it as
+`Authorization: Bearer <access_token>`. The account comes from `ORCA_AUTH_USERNAME` /
+`ORCA_AUTH_PASSWORD` (defaults shown) — **change the password** anywhere beyond localhost.
+Tokens last `ORCA_AUTH_TOKEN_TTL_HOURS` (12) and are signed with `ORCA_AUTH_SECRET`, or with a
+key derived from the credentials when that is empty.
 
 ---
 

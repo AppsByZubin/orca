@@ -7,6 +7,41 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 
+# --- session ----------------------------------------------------------------
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class SessionOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    username: str
+    expires_at: int  # epoch seconds
+
+
+# --- broker tokens ----------------------------------------------------------
+class BrokerTokenIn(BaseModel):
+    access_token: str = Field(min_length=1)
+
+
+class BrokerTokenOut(BaseModel):
+    broker: str
+    label: str
+    has_token: bool
+    source: str | None = None  # "saved" (Tokens page) | "env" | None
+    token_hint: str | None = None  # last 4 characters, never the token
+    saved_at: datetime | None = None
+    expires_at: datetime | None = None
+    expired: bool
+    rejected: bool
+    in_use: bool  # this broker is the configured feed / gateway
+    api_key_configured: bool
+    needs_attention: bool  # missing, expired, or only an env token of unknown age
+    verified: bool | None = None  # only on save/verify: did the broker accept it
+    verify_detail: str | None = None
+
+
 # --- market -----------------------------------------------------------------
 class UnderlyingOut(BaseModel):
     symbol: str

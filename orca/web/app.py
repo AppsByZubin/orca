@@ -47,8 +47,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     # The UI is a separate project on its own origin, so CORS is load-bearing
-    # now rather than a convenience. Replace "*" with that origin before this
-    # app is reachable from anywhere but localhost - the API has no auth.
+    # now rather than a convenience. Access control is the bearer-token login
+    # (orca.web.security); still narrow "*" to the UI's origin in deployments.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=get_settings().cors_origins,

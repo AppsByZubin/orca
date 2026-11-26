@@ -62,6 +62,15 @@ def daily_rollup_job() -> None:
     log.info("daily rollup for %s - add retraining/reporting here", date.today())
 
 
+def token_check_job() -> None:
+    from orca.services.broker_tokens import recheck_saved
+
+    try:
+        recheck_saved()
+    except Exception:  # noqa: BLE001
+        log.exception("token re-check failed")
+
+
 def build_scheduler() -> BackgroundScheduler:
     settings = get_settings()
     tz = get_universe().market.timezone
@@ -90,6 +99,14 @@ def build_scheduler() -> BackgroundScheduler:
         id="scan",
         name="rank candidates",
     )
+    if settings.token_check_interval_sec > 0:
+        scheduler.add_job(
+            token_check_job,
+            "interval",
+            seconds=settings.token_check_interval_sec,
+            id="token-check",
+            name="re-verify broker tokens",
+        )
     scheduler.add_job(daily_rollup_job, "cron", hour=16, minute=0, id="rollup", name="daily rollup")
     return scheduler
 

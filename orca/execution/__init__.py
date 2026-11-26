@@ -44,9 +44,26 @@ def build_gateway(name: str | None = None) -> OrderGateway:
     raise ValueError(f"unknown execution gateway {name!r} (expected 'kite' or 'paper')")
 
 
+_cached_token: str | None = None  # the Kite token _cached was built with
+
+
+def _kite_token() -> str | None:
+    if get_settings().execution_gateway.lower() != "kite":
+        return None
+    from orca.services.broker_tokens import current_token
+
+    return current_token("kite")
+
+
 def get_gateway() -> OrderGateway:
-    global _cached
+    """Process-wide gateway, rebuilt when the stored Kite token changes."""
+    global _cached, _cached_token
+    token = _kite_token()
+    if _cached is not None and token != _cached_token:
+        log.info("kite token changed; rebuilding the order gateway")
+        _cached = None
     if _cached is None:
+        _cached_token = token
         _cached = build_gateway()
         log.info("execution gateway: %s (live=%s)", _cached.name, _cached.live)
     return _cached

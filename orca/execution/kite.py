@@ -19,6 +19,7 @@ exchange unless ORCA_TRADING_ENABLED=true *and* ORCA_EXECUTION_GATEWAY=kite.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -49,7 +50,96 @@ STATUS_MAP = {
 }
 
 
+@dataclass
+class KiteTokenCheck:
+    """Outcome of asking Kite whether an access token works.
+
+    ok is True (Kite accepted it), False (Kite rejected it - expired, revoked,
+    or minted for a different api_key) or None (could not tell: no api_key,
+    network trouble, rate limit, Kite outage).
+    """
+
+    ok: bool | None
+    detail: str
+    user_id: str | None = None
+    user_name: str | None = None
+    exchanges: list[str] = field(default_factory=list)
+    missing_exchanges: list[str] = field(default_factory=list)
+
+
+def normalize_kite_token(raw: str, api_key: str = "") -> str:
+    """Undo the usual paste mistakes: the whole `token <api_key>:<access_token>`
+    header, or `<api_key>:<access_token>`, instead of just the access token."""
+    token = raw.strip().strip("\"'")
+    if token.lower().startswith("token "):
+        token = token[6:].strip()
+    if ":" in token:
+        prefix, _, rest = token.partition(":")
+        if not api_key or prefix == api_key:
+            token = rest.strip()
+    return token
+
+
 class KiteAuth:
+    @staticmethod
+    def verify_token(
+        access_token: str,
+        api_key: str | None = None,
+        required_exchanges: list[str] | None = None,
+        timeout: float = 8.0,
+    ) -> KiteTokenCheck:
+        """GET /user/profile with the token - the cheapest authenticated call.
+
+        A pass also reports whose account the token belongs to and whether that
+        account can trade `required_exchanges` (the option segments ORCA uses);
+        a token for an account without NFO/BFO is accepted but flagged.
+        """
+        api_key = api_key if api_key is not None else get_settings().kite_api_key
+        if not api_key:
+            return KiteTokenCheck(
+                None, "KITE_API_KEY is not configured, so the token cannot be checked"
+            )
+        token = normalize_kite_token(access_token, api_key)
+        if not token or any(c.isspace() for c in token):
+            return KiteTokenCheck(False, "that does not look like a Kite access token")
+        try:
+            resp = httpx.get(
+                f"{KITE_BASE}/user/profile",
+                headers={"X-Kite-Version": "3", "Authorization": f"token {api_key}:{token}"},
+                timeout=timeout,
+            )
+        except httpx.HTTPError as exc:
+            return KiteTokenCheck(None, f"could not reach Zerodha Kite: {exc}")
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        message = body.get("message") or f"HTTP {resp.status_code}"
+        error_type = body.get("error_type")
+
+        if resp.status_code == 403 or error_type == "TokenException":
+            # Kite uses the same TokenException for an expired token, a revoked
+            # one, and a token minted under a different api_key.
+            return KiteTokenCheck(
+                False,
+                f"Zerodha Kite rejected the token ({message}). It has expired or been revoked, "
+                "or it was generated for a different app than KITE_API_KEY.",
+            )
+        if resp.status_code == 429:
+            return KiteTokenCheck(None, "Zerodha Kite rate-limited the check; try again shortly")
+        if resp.status_code >= 400 or body.get("status") == "error":
+            return KiteTokenCheck(None, f"Zerodha Kite could not check the token: {message}")
+
+        data = body.get("data") or {}
+        user_id, user_name = data.get("user_id"), data.get("user_name")
+        exchanges = [str(e) for e in data.get("exchanges") or []]
+        missing = [e for e in required_exchanges or [] if exchanges and e not in exchanges]
+        who = f"{user_id} ({user_name})" if user_name else str(user_id or "unknown account")
+        detail = f"Zerodha Kite accepted the token for {who}"
+        if missing:
+            detail += f", but the account is not enabled for {', '.join(missing)}"
+        return KiteTokenCheck(True, detail, user_id, user_name, exchanges, missing)
+
     @staticmethod
     def login_url() -> str:
         return KITE_LOGIN.format(api_key=get_settings().kite_api_key)
@@ -80,13 +170,15 @@ class KiteGateway(OrderGateway):
     live = True
 
     def __init__(self, api_key: str | None = None, access_token: str | None = None) -> None:
+        from orca.services.broker_tokens import current_token
+
         s = get_settings()
         self.api_key = api_key or s.kite_api_key
-        self.access_token = access_token or s.kite_access_token
+        self.access_token = access_token or current_token("kite")
         if not self.api_key or not self.access_token:
             raise ExecutionError(
-                "KITE_API_KEY / KITE_ACCESS_TOKEN missing. Use ORCA_EXECUTION_GATEWAY=paper "
-                "until Kite credentials are configured."
+                "KITE_API_KEY or a current Kite token is missing - add today's token on the "
+                "UI's Tokens page, or use ORCA_EXECUTION_GATEWAY=paper."
             )
         self._client = httpx.Client(
             base_url=KITE_BASE,
@@ -113,6 +205,10 @@ class KiteGateway(OrderGateway):
             body = resp.json()
         except ValueError:
             raise ExecutionError(f"kite {path} -> {resp.status_code}: {resp.text[:300]}") from None
+        if resp.status_code == 403 and body.get("error_type") == "TokenException":
+            from orca.services.broker_tokens import mark_rejected
+
+            mark_rejected("kite", self.access_token)
         if resp.status_code >= 400 or body.get("status") == "error":
             raise ExecutionError(f"kite {path}: {body.get('message') or resp.text[:200]}")
         return body.get("data", {})

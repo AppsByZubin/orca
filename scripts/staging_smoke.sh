@@ -4,9 +4,12 @@
 # has quietly been pointed at a live gateway is worse than one that is down.
 #
 #   ./scripts/staging_smoke.sh [base_url]
+#   ORCA_AUTH_USERNAME / ORCA_AUTH_PASSWORD override the dashboard login.
 set -uo pipefail
 
 BASE="${1:-http://127.0.0.1:8000}"
+AUTH_USER="${ORCA_AUTH_USERNAME:-Admin}"
+AUTH_PASS="${ORCA_AUTH_PASSWORD:-passwordpassword}"
 PASS=0; FAIL=0
 
 ok()   { printf '  \033[32mPASS\033[0m  %s\n' "$1"; PASS=$((PASS+1)); }
@@ -58,15 +61,25 @@ else
 fi
 
 echo
+echo "login"
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/api/portfolio")
+check "GET /api/portfolio without token" "$code" "401"
+login_body=$(python3 -c 'import json,sys; print(json.dumps({"username":sys.argv[1],"password":sys.argv[2]}))' "$AUTH_USER" "$AUTH_PASS")
+TOKEN=$(curl -fsS --max-time 10 -X POST "$BASE/api/session/login" \
+  -H 'Content-Type: application/json' -d "$login_body" 2>/dev/null | jqf access_token)
+if [ -n "$TOKEN" ] && [ "$TOKEN" != "<missing>" ]; then ok "POST /api/session/login"; else bad "POST /api/session/login"; TOKEN=""; fi
+AUTH=(-H "Authorization: Bearer $TOKEN")
+
+echo
 echo "read endpoints"
 for p in /api/market/underlyings /api/signals /api/portfolio /api/model; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE$p")
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${AUTH[@]}" "$BASE$p")
   [ "$code" = "200" ] && ok "GET $p -> 200" || bad "GET $p -> $code"
 done
 
 echo
 echo "scan produces candidates"
-scan=$(curl -fsS --max-time 30 -X POST "$BASE/api/signals/scan" \
+scan=$(curl -fsS --max-time 30 -X POST "$BASE/api/signals/scan" "${AUTH[@]}" \
   -H 'Content-Type: application/json' \
   -d '{"symbols":["SENSEX"],"lots":1,"limit":5,"persist":true}' 2>/dev/null)
 if [ -n "$scan" ]; then

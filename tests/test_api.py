@@ -11,7 +11,52 @@ from orca.web.app import create_app
 @pytest.fixture(scope="module")
 def client():
     with TestClient(create_app()) as c:
+        resp = c.post(
+            "/api/session/login", json={"username": "Admin", "password": "passwordpassword"}
+        )
+        assert resp.status_code == 200, resp.text
+        c.headers["Authorization"] = f"Bearer {resp.json()['access_token']}"
         yield c
+
+
+@pytest.fixture(scope="module")
+def anon():
+    with TestClient(create_app()) as c:
+        yield c
+
+
+def test_login_rejects_bad_credentials(anon) -> None:
+    for user, pwd in [("Admin", "wrong"), ("admin", "passwordpassword"), ("", "")]:
+        resp = anon.post("/api/session/login", json={"username": user, "password": pwd})
+        assert resp.status_code == 401
+
+
+def test_protected_routes_need_token(anon) -> None:
+    for path in ["/api/market/underlyings", "/api/portfolio", "/api/model", "/api/session/me"]:
+        assert anon.get(path).status_code == 401, path
+    bad = {"Authorization": "Bearer not-a-token"}
+    assert anon.get("/api/portfolio", headers=bad).status_code == 401
+    # Probes and the login itself stay open.
+    assert anon.get("/api/health").status_code == 200
+
+
+def test_token_identifies_user(client) -> None:
+    assert client.get("/api/session/me").json() == {"username": "Admin"}
+
+
+def test_tampered_or_expired_token_rejected() -> None:
+    from orca.config import get_settings
+    from orca.web.security import issue_token, verify_token
+
+    token, _ = issue_token("Admin")
+    assert verify_token(token) == "Admin"
+    body, sig = token.split(".")
+    assert verify_token(body + "x." + sig) is None
+    assert verify_token(token[:-2] + "AA") is None
+
+    settings = get_settings().model_copy(update={"auth_token_ttl_hours": -1})
+    expired, _ = issue_token("Admin", settings)
+    assert verify_token(expired, settings) is None
 
 
 def test_health(client) -> None:

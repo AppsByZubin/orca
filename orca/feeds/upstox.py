@@ -71,12 +71,14 @@ class UpstoxProvider(MarketDataProvider):
     name = "upstox"
 
     def __init__(self, access_token: str | None = None, timeout: float = 15.0) -> None:
+        from orca.services.broker_tokens import current_token
+
         settings = get_settings()
-        self.token = access_token or settings.upstox_access_token
+        self.token = access_token or current_token("upstox")
         if not self.token:
             raise FeedError(
-                "UPSTOX_ACCESS_TOKEN is empty. Set ORCA_FEED_PROVIDER=mock for offline "
-                "development, or generate a token (see orca.feeds.upstox.UpstoxAuth)."
+                "no current Upstox token - add today's on the UI's Tokens page "
+                "(or set ORCA_FEED_PROVIDER=mock for offline development)"
             )
         self.r = settings.risk_free_rate
         self._client = httpx.Client(
@@ -92,6 +94,9 @@ class UpstoxProvider(MarketDataProvider):
         except httpx.HTTPError as exc:  # network level
             raise FeedError(f"upstox request failed: {exc}") from exc
         if resp.status_code == 401:
+            from orca.services.broker_tokens import mark_rejected
+
+            mark_rejected("upstox", self.token)
             raise FeedError("upstox token rejected (401) - the daily token has expired")
         if resp.status_code >= 400:
             raise FeedError(f"upstox {path} -> {resp.status_code}: {resp.text[:300]}")

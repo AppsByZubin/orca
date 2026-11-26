@@ -56,14 +56,25 @@ class Settings(BaseSettings):
 
     # --- web ---
     # Origins allowed to call the API. The UI is a separate project, so this is
-    # the only thing standing between it and a cross-origin block - and, since
-    # the API has no auth, the only access control there is. Comma-separated.
+    # the only thing standing between it and a cross-origin block.
+    # Comma-separated.
     cors_origins_raw: str = Field(default="*", alias="ORCA_CORS_ORIGINS")
+
+    # Dashboard login. One operator account; every /api route except /health,
+    # /session/login and the broker OAuth callbacks requires its bearer token.
+    # The secret signs those tokens - leave it empty to derive one from the
+    # credentials (so changing the password also logs everyone out).
+    auth_username: str = Field(default="Admin", alias="ORCA_AUTH_USERNAME")
+    auth_password: str = Field(default="passwordpassword", alias="ORCA_AUTH_PASSWORD")
+    auth_secret: str = Field(default="", alias="ORCA_AUTH_SECRET")
+    auth_token_ttl_hours: float = Field(default=12.0, alias="ORCA_AUTH_TOKEN_TTL_HOURS")
 
     # --- scheduler ---
     scheduler_enabled: bool = Field(default=True, alias="ORCA_SCHEDULER_ENABLED")
     snapshot_interval_sec: int = Field(default=60, alias="ORCA_SNAPSHOT_INTERVAL_SEC")
     tracker_interval_sec: int = Field(default=15, alias="ORCA_TRACKER_INTERVAL_SEC")
+    # How often the worker re-verifies the saved Zerodha token with Kite (0 = off).
+    token_check_interval_sec: int = Field(default=900, alias="ORCA_TOKEN_CHECK_INTERVAL_SEC")
 
     # --- ml ---
     model_dir: Path = Field(default=DATA_DIR / "models", alias="ORCA_MODEL_DIR")
